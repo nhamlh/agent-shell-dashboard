@@ -1373,6 +1373,13 @@ and recent-session rows (`agent-shell-dashboard-session')."
     (or (get-text-property p 'agent-shell-dashboard-buffer)
         (get-text-property p 'agent-shell-dashboard-session))))
 
+(defun agent-shell-dashboard--posframe-parent-frame ()
+  "Return top-level parent frame for dashboard posframe."
+  (let ((frame (window-frame (selected-window))))
+    (while (frame-parent frame)
+      (setq frame (frame-parent frame)))
+    frame))
+
 (defun agent-shell-dashboard--posframe-active-p ()
   "Return non-nil when the dashboard posframe is currently visible."
   (and (featurep 'posframe)
@@ -1715,16 +1722,23 @@ Suitable as an `initial-buffer-choice'."
        ((eq agent-shell-dashboard-display-action 'posframe)
         (if (posframe-workable-p)
             (progn
-              (setq agent-shell-dashboard--origin-window (selected-window))
-              (posframe-show
-               agent-shell-dashboard-buffer-name
-               :poshandler #'posframe-poshandler-frame-center
-               :width agent-shell-dashboard-posframe-width
-               :height agent-shell-dashboard-posframe-height
-               :internal-border-width agent-shell-dashboard-posframe-border-width
-               :border-color (face-foreground 'shadow nil t)
-               :accept-focus t
-               :hidehandler #'posframe-hidehandler-when-buffer-switch)
+              (let ((parent-frame (agent-shell-dashboard--posframe-parent-frame)))
+                (setq agent-shell-dashboard--origin-window
+                      (frame-selected-window parent-frame))
+                ;; `posframe-show' parents its child frame to selected frame.
+                ;; Force top-level frame here: callers may run from another
+                ;; posframe, which otherwise creates a parent-frame cycle.
+                (with-selected-frame parent-frame
+                  (with-selected-window agent-shell-dashboard--origin-window
+                    (posframe-show
+                     agent-shell-dashboard-buffer-name
+                     :poshandler #'posframe-poshandler-frame-center
+                     :width agent-shell-dashboard-posframe-width
+                     :height agent-shell-dashboard-posframe-height
+                     :internal-border-width agent-shell-dashboard-posframe-border-width
+                     :border-color (face-foreground 'shadow nil t)
+                     :accept-focus t
+                     :hidehandler #'posframe-hidehandler-when-buffer-switch))))
               (let ((pf-frame (buffer-local-value 'posframe--frame buf)))
                 (when (framep pf-frame)
                   (select-frame-set-input-focus pf-frame)
