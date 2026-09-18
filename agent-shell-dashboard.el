@@ -76,11 +76,13 @@
   'posframe
   "Display style used when opening the dashboard interactively.
 Can be:
-  `posframe'                  - Floating centered modal window (via `posframe')
+  `posframe'                  - Floating centered child frame (via `posframe')
+  `frame'                     - Normal Emacs frame
   `(pop-to-buffer)'           - Buffer popup obeying `display-buffer-alist'
   `(pop-to-buffer-same-window)' - Current window full replacement
   or a custom function accepting the dashboard buffer."
   :type '(choice (const :tag "Centered floating popup (posframe)" posframe)
+                 (const :tag "Normal Emacs frame" frame)
                  (const :tag "Doom / Emacs display buffer" (pop-to-buffer))
                  (const :tag "Same window" (pop-to-buffer-same-window))
                  (function :tag "Custom display function")))
@@ -98,7 +100,10 @@ Can be:
   :type 'integer)
 
 (defvar agent-shell-dashboard--origin-window nil
-  "Window that had focus when posframe dashboard was opened.")
+  "Window that had focus when dashboard frame was opened.")
+
+(defvar agent-shell-dashboard--frame nil
+  "Normal frame used to display dashboard, if any.")
 
 (defcustom agent-shell-dashboard-banner
   '("   __ _  __ _  ___ _ __ | |_   ___| |__   ___| | |"
@@ -1389,22 +1394,44 @@ and recent-session rows (`agent-shell-dashboard-session')."
                 (and (frame-live-p frame)
                      (frame-visible-p frame)))))))
 
+(defun agent-shell-dashboard--restore-origin-window ()
+  "Restore focus to dashboard's origin window."
+  (let ((window agent-shell-dashboard--origin-window))
+    (setq agent-shell-dashboard--origin-window nil)
+    (when (window-live-p window)
+      (select-window window)
+      (select-frame-set-input-focus (window-frame window)))))
+
+(defun agent-shell-dashboard--frame-active-p ()
+  "Return non-nil when dashboard normal frame is currently visible."
+  (and (frame-live-p agent-shell-dashboard--frame)
+       (frame-visible-p agent-shell-dashboard--frame)))
+
+(defun agent-shell-dashboard-frame-hide ()
+  "Delete dashboard normal frame and restore origin focus."
+  (interactive)
+  (let ((frame agent-shell-dashboard--frame))
+    (setq agent-shell-dashboard--frame nil)
+    (when (frame-live-p frame)
+      (delete-frame frame)))
+  (agent-shell-dashboard--restore-origin-window))
+
 (defun agent-shell-dashboard-posframe-hide ()
-  "Hide the dashboard posframe and restore focus to origin window."
+  "Hide dashboard posframe and restore origin focus."
   (interactive)
   (when (featurep 'posframe)
     (posframe-hide agent-shell-dashboard-buffer-name))
-  (when (window-live-p agent-shell-dashboard--origin-window)
-    (select-window agent-shell-dashboard--origin-window)
-    (select-frame-set-input-focus (window-frame agent-shell-dashboard--origin-window))
-    (setq agent-shell-dashboard--origin-window nil)))
+  (agent-shell-dashboard--restore-origin-window))
 
 (defun agent-shell-dashboard-quit ()
-  "Dismiss the dashboard window or posframe."
+  "Dismiss dashboard normal frame, posframe, or window."
   (interactive)
-  (if (agent-shell-dashboard--posframe-active-p)
-      (agent-shell-dashboard-posframe-hide)
-    (quit-window)))
+  (cond
+   ((agent-shell-dashboard--frame-active-p)
+    (agent-shell-dashboard-frame-hide))
+   ((agent-shell-dashboard--posframe-active-p)
+    (agent-shell-dashboard-posframe-hide))
+   (t (quit-window))))
 
 (defun agent-shell-dashboard-open ()
   "Open or reopen the session on the row at point.
@@ -1413,9 +1440,11 @@ A live-session row is switched to; a recent-session row is resumed via
   (interactive)
   (let ((buf (agent-shell-dashboard--buffer-at-point))
         (session (agent-shell-dashboard--session-at-point))
-        (in-posframe (agent-shell-dashboard--posframe-active-p)))
-    (when in-posframe
-      (agent-shell-dashboard-posframe-hide))
+        (in-posframe (agent-shell-dashboard--posframe-active-p))
+        (in-frame (agent-shell-dashboard--frame-active-p)))
+    (cond
+     (in-frame (agent-shell-dashboard-frame-hide))
+     (in-posframe (agent-shell-dashboard-posframe-hide)))
     (cond
      (buf (if (buffer-live-p buf)
               (pop-to-buffer buf)
@@ -1744,6 +1773,13 @@ Suitable as an `initial-buffer-choice'."
                   (select-frame-set-input-focus pf-frame)
                   (select-window (frame-selected-window pf-frame) t))))
           (pop-to-buffer buf)))
+       ((eq agent-shell-dashboard-display-action 'frame)
+        (setq agent-shell-dashboard--origin-window (selected-window))
+        (let ((frame (make-frame '((name . "Agent Shell Dashboard")))))
+          (setq agent-shell-dashboard--frame frame)
+          (with-selected-frame frame
+            (switch-to-buffer buf))
+          (select-frame-set-input-focus frame)))
        ((equal agent-shell-dashboard-display-action '(pop-to-buffer))
         (pop-to-buffer buf))
        ((equal agent-shell-dashboard-display-action '(pop-to-buffer-same-window))
