@@ -73,6 +73,25 @@ to a message when the summarizer CLI isn't available.
 
 Then `doom sync` and restart. Bind it if you like: `(map! :leader "d" #'agent-shell-dashboard)`.
 
+### Projectile and Doom workspaces
+
+Optional `agent-shell-dashboard-projectile` integration groups live agents under
+Projectile project headings. Opening an agent switches to Doom workspace that
+already owns its buffer, or to workspace associated with its project root. If no
+such workspace exists, Doom creates one without running its usual project-open
+action.
+
+```elisp
+(use-package! agent-shell-dashboard-projectile
+  :after (agent-shell-dashboard projectile)
+  :config
+  (agent-shell-dashboard-projectile-mode 1))
+```
+
+Outside Doom, project grouping still works; workspace switching becomes no-op.
+Set `agent-shell-dashboard-projectile-switch-workspace-function` to custom
+function of `(project-root buffer)` to support another workspace package.
+
 <details>
 <summary>straight.el / vanilla</summary>
 
@@ -106,10 +125,12 @@ highlight alone).
 
 ## Dependencies
 
-Only hard dependency: **`agent-shell`**. Optional, auto-detected: `modus-themes`
-(faces recolor on theme toggle), `projectile` (widens the Recent sessions scan),
-`agent-shell-manager` (extra refresh trigger). A visible dashboard
-refreshes on demand (`g`), on an idle timer, and (debounced) on agent activity.
+Only core hard dependency: **`agent-shell`**. Optional integration file
+`agent-shell-dashboard-projectile.el` requires **Projectile**. Other optional,
+auto-detected features: `modus-themes` (faces recolor on theme toggle),
+`projectile` (widens Recent sessions scan), and `agent-shell-manager` (extra
+refresh trigger). A visible dashboard refreshes on demand (`g`), on an idle
+timer, and (debounced) on agent activity.
 
 ## License
 
