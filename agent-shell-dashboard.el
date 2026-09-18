@@ -72,6 +72,34 @@
   "Name of the dashboard buffer."
   :type 'string)
 
+(defcustom agent-shell-dashboard-display-action
+  'posframe
+  "Display style used when opening the dashboard interactively.
+Can be:
+  `posframe'                  - Floating centered modal window (via `posframe')
+  `(pop-to-buffer)'           - Buffer popup obeying `display-buffer-alist'
+  `(pop-to-buffer-same-window)' - Current window full replacement
+  or a custom function accepting the dashboard buffer."
+  :type '(choice (const :tag "Centered floating popup (posframe)" posframe)
+                 (const :tag "Doom / Emacs display buffer" (pop-to-buffer))
+                 (const :tag "Same window" (pop-to-buffer-same-window))
+                 (function :tag "Custom display function")))
+
+(defcustom agent-shell-dashboard-posframe-width 120
+  "Width in columns of the dashboard posframe."
+  :type 'integer)
+
+(defcustom agent-shell-dashboard-posframe-height 42
+  "Height in lines of the dashboard posframe."
+  :type 'integer)
+
+(defcustom agent-shell-dashboard-posframe-border-width 2
+  "Internal and external border width for the dashboard posframe."
+  :type 'integer)
+
+(defvar agent-shell-dashboard--origin-window nil
+  "Window that had focus when posframe dashboard was opened.")
+
 (defcustom agent-shell-dashboard-banner
   '("   __ _  __ _  ___ _ __ | |_   ___| |__   ___| | |"
     "  / _` |/ _` |/ _ \\ '_ \\| __| / __| '_ \\ / _ \\ | |"
@@ -1345,13 +1373,42 @@ and recent-session rows (`agent-shell-dashboard-session')."
     (or (get-text-property p 'agent-shell-dashboard-buffer)
         (get-text-property p 'agent-shell-dashboard-session))))
 
+(defun agent-shell-dashboard--posframe-active-p ()
+  "Return non-nil when the dashboard posframe is currently visible."
+  (and (featurep 'posframe)
+       (let ((buf (get-buffer agent-shell-dashboard-buffer-name)))
+         (and buf
+              (let ((frame (buffer-local-value 'posframe--frame buf)))
+                (and (frame-live-p frame)
+                     (frame-visible-p frame)))))))
+
+(defun agent-shell-dashboard-posframe-hide ()
+  "Hide the dashboard posframe and restore focus to origin window."
+  (interactive)
+  (when (featurep 'posframe)
+    (posframe-hide agent-shell-dashboard-buffer-name))
+  (when (window-live-p agent-shell-dashboard--origin-window)
+    (select-window agent-shell-dashboard--origin-window)
+    (select-frame-set-input-focus (window-frame agent-shell-dashboard--origin-window))
+    (setq agent-shell-dashboard--origin-window nil)))
+
+(defun agent-shell-dashboard-quit ()
+  "Dismiss the dashboard window or posframe."
+  (interactive)
+  (if (agent-shell-dashboard--posframe-active-p)
+      (agent-shell-dashboard-posframe-hide)
+    (quit-window)))
+
 (defun agent-shell-dashboard-open ()
   "Open or reopen the session on the row at point.
 A live-session row is switched to; a recent-session row is resumed via
 `agent-shell-dashboard-resume-recent-function'."
   (interactive)
   (let ((buf (agent-shell-dashboard--buffer-at-point))
-        (session (agent-shell-dashboard--session-at-point)))
+        (session (agent-shell-dashboard--session-at-point))
+        (in-posframe (agent-shell-dashboard--posframe-active-p)))
+    (when in-posframe
+      (agent-shell-dashboard-posframe-hide))
     (cond
      (buf (if (buffer-live-p buf)
               (pop-to-buffer buf)
@@ -1590,7 +1647,8 @@ live buffer.  Refreshes afterwards so the reopened session appears."
   "X"         #'agent-shell-dashboard-close-all
   "g"         #'agent-shell-dashboard-refresh
   "?"         #'agent-shell-dashboard-help
-  "q"         #'quit-window)
+  "q"         #'agent-shell-dashboard-quit
+  "C-g"       #'agent-shell-dashboard-quit)
 
 (define-derived-mode agent-shell-dashboard-mode special-mode "Agent-Dashboard"
   "Major mode for the agent-shell landing page."
@@ -1625,7 +1683,8 @@ live buffer.  Refreshes afterwards so the reopened session appears."
     "X" #'agent-shell-dashboard-close-all
     "g" #'agent-shell-dashboard-refresh
     "?" #'agent-shell-dashboard-help
-    "q" #'quit-window))
+    "q" #'agent-shell-dashboard-quit
+    (kbd "C-g") #'agent-shell-dashboard-quit))
 
 ;;;; Entry point
 
@@ -1652,7 +1711,32 @@ Suitable as an `initial-buffer-choice'."
         (agent-shell-dashboard--goto-first-row)))
     (agent-shell-dashboard--ensure-idle-timer)
     (when (called-interactively-p 'interactive)
-      (pop-to-buffer-same-window buf))
+      (cond
+       ((eq agent-shell-dashboard-display-action 'posframe)
+        (if (posframe-workable-p)
+            (progn
+              (setq agent-shell-dashboard--origin-window (selected-window))
+              (posframe-show
+               agent-shell-dashboard-buffer-name
+               :poshandler #'posframe-poshandler-frame-center
+               :width agent-shell-dashboard-posframe-width
+               :height agent-shell-dashboard-posframe-height
+               :internal-border-width agent-shell-dashboard-posframe-border-width
+               :border-color (face-foreground 'shadow nil t)
+               :accept-focus t
+               :hidehandler #'posframe-hidehandler-when-buffer-switch)
+              (let ((pf-frame (buffer-local-value 'posframe--frame buf)))
+                (when (framep pf-frame)
+                  (select-frame-set-input-focus pf-frame)
+                  (select-window (frame-selected-window pf-frame) t))))
+          (pop-to-buffer buf)))
+       ((equal agent-shell-dashboard-display-action '(pop-to-buffer))
+        (pop-to-buffer buf))
+       ((equal agent-shell-dashboard-display-action '(pop-to-buffer-same-window))
+        (pop-to-buffer-same-window buf))
+       ((functionp agent-shell-dashboard-display-action)
+        (funcall agent-shell-dashboard-display-action buf))
+       (t (pop-to-buffer buf agent-shell-dashboard-display-action))))
     buf))
 
 ;;;; Theme layer — recolor faces from the live modus palette
